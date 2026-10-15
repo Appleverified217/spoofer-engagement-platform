@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Follower Farming & Engagement Exchange</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f4f7f6; margin: 0; padding: 20px; }
+    .container { max-width: 900px; margin: auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+    h1 { color: #333; }
+    .card { background: #fafafa; border: 1px solid #ddd; padding: 20px; margin-bottom: 20px; border-radius: 6px; }
+    button { background: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #0056b3; }
+    input, select { padding: 8px; width: 100%; margin-bottom: 10px; box-sizing: border-box; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background: #007bff; color: white; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Social Media Engagement & Followers Farming</h1>
+
+    <!-- Dashboard -->
+    <div class="card">
+      <h3>Dashboard (User: <span id="usernameDisplay">Guest</span> | ID: <span id="userIdDisplay">1</span>)</h3>
+      <p>Credits: <strong id="creditsDisplay">1000</strong></p>
+      <button onclick="loadUser(1)">Refresh Balance</button>
+    </div>
+
+    <!-- Campaign Section -->
+    <div class="card">
+      <h3>Create Follower / Engagement Campaign</h3>
+      <form onsubmit="createCampaign(event)">
+        <label for="platform">Platform:</label>
+        <select id="platform">
+          <option value="instagram">Instagram</option>
+          <option value="tiktok">TikTok</option>
+          <option value="twitter">Twitter / X</option>
+          <option value="youtube">YouTube</option>
+        </select>
+        <label for="targetUrl">Target Profile/Post URL:</label>
+        <input type="text" id="targetUrl" placeholder="https://instagram.com/username" required>
+        <label for="targetCount">Target Follower Count:</label>
+        <input type="number" id="targetCount" value="10" min="1" required>
+        <button type="submit">Launch Campaign (-<span id="costPreview">100</span> Credits)</button>
+      </form>
+    </div>
+
+    <!-- Tasks Section -->
+    <div class="card">
+      <h3>Earn Credits (Available Micro-Tasks)</h3>
+      <button onclick="loadTasks()">Load Tasks</button>
+      <table id="tasksTable">
+        <thead>
+          <tr><th>ID</th><th>Platform</th><th>Target URL</th><th>Reward</th><th>Action</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = 'http://localhost:4000/api';
+    let currentUserId = 1;
+    let socket = null;
+
+    async function loadUser(id) {
+      try {
+        const res = await fetch(`${API_URL}/users/${id}`);
+        const data = await res.json();
+        document.getElementById('creditsDisplay').innerText = data.credits;
+        document.getElementById('usernameDisplay').innerText = data.username;
+        document.getElementById('userIdDisplay').innerText = data.id;
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    function initSocket(userId) {
+      socket = io();
+      socket.emit('join_room', userId);
+      socket.on('credit_update', (data) => {
+        document.getElementById('creditsDisplay').innerText = data.credits;
+        alert(data.message);
+        loadTasks();
+      });
+    }
+
+    async function loadTasks() {
+      try {
+        const res = await fetch(`${API_URL}/tasks/available`);
+        const tasks = await res.json();
+        const tbody = document.querySelector('#tasksTable tbody');
+        tbody.innerHTML = '';
+        if (tasks.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No pending tasks available. Create a campaign above to generate tasks!</td></tr>';
+          return;
+        }
+        tasks.forEach(t => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${t.id}</td><td>${t.platform}</td><td><a href="${t.target_url}" target="_blank">View Link</a></td><td>${t.reward} Credits</td><td><button onclick="completeTask(${t.id})">Complete & Earn</button></td>`;
+          tbody.appendChild(tr);
+        });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function completeTask(taskId) {
+      try {
+        const res = await fetch(`${API_URL}/tasks/complete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskId, workerId: currentUserId })
+        });
+        const data = await res.json();
+        alert(data.message || data.error);
+        loadTasks();
+        loadUser(currentUserId);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function createCampaign(e) {
+      e.preventDefault();
+      const platform = document.getElementById('platform').value;
+      const targetUrl = document.getElementById('targetUrl').value;
+      const targetCount = parseInt(document.getElementById('targetCount').value);
+
+      try {
+        const res = await fetch(`${API_URL}/campaigns`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: currentUserId, platform, targetUrl, targetCount })
+        });
+        const data = await res.json();
+        alert(data.message || data.error);
+        loadUser(currentUserId);
+        loadTasks();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    document.getElementById('targetCount').addEventListener('input', (e) => {
+      document.getElementById('costPreview').innerText = e.target.value * 10;
+    });
+
+    // Initialize on load
+    loadUser(currentUserId);
+    initSocket(currentUserId);
+    loadTasks();
+  </script>
+</body>
+</html>

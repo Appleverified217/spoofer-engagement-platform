@@ -1,0 +1,38 @@
+CREATE TABLE IF NOT EXISTS users (
+  id SERIAL PRIMARY KEY,
+  username VARCHAR(50) UNIQUE NOT NULL,
+  email VARCHAR(100) UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  credits INT DEFAULT 100,
+  role VARCHAR(20) DEFAULT 'user',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS campaigns (
+  id SERIAL PRIMARY KEY,
+  user_id INT REFERENCES users(id) ON DELETE CASCADE,
+  platform VARCHAR(30) NOT NULL,
+  target_url TEXT NOT NULL,
+  target_count INT NOT NULL,
+  completed_count INT DEFAULT 0,
+  status VARCHAR(20) DEFAULT 'active',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS tasks (
+  id SERIAL PRIMARY KEY,
+  campaign_id INT REFERENCES campaigns(id) ON DELETE CASCADE,
+  worker_id INT REFERENCES users(id) ON DELETE SET NULL,
+  status VARCHAR(20) DEFAULT 'pending',
+  reward INT DEFAULT 10,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS transactions (
+  id SERIAL PRIMARY KEY,
+  user_id INT REFERENCES users(id) ON DELETE CASCADE,
+  amount INT NOT NULL,
+  type VARCHAR(30) NOT NULL,
+  description TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
