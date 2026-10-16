@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
-const { engagementQueue } = require('../workers/queue');
 
 // Ensure a default guest user exists on startup
 async function ensureGuestUser() {
@@ -51,16 +50,10 @@ router.post('/campaigns', async (req, res) => {
     const campaign = campRes.rows[0];
 
     for (let i = 0; i < targetCount; i++) {
-      const taskRes = await db.query(
-        'INSERT INTO tasks (campaign_id, reward) VALUES ($1, $2) RETURNING id',
+      await db.query(
+        'INSERT INTO tasks (campaign_id, reward) VALUES ($1, $2)',
         [campaign.id, 10]
       );
-      await engagementQueue.add('process-engagement', {
-        taskId: taskRes.rows[0].id,
-        campaignId: campaign.id,
-        reward: 10,
-        targetUrl,
-      }, { delay: i * 1000 });
     }
     await db.query('COMMIT');
 
@@ -93,28 +86,14 @@ router.get('/tasks/available', async (req, res) => {
 router.post('/tasks/complete', async (req, res) => {
   try {
     const taskId = req.body.taskId;
-    const workerId = req.body.workerId || 1;
-
     const taskCheck = await db.query('SELECT * FROM tasks WHERE id = $1 AND status = $2', [taskId, 'pending']);
     if (taskCheck.rows.length === 0) {
       return res.status(400).json({ error: 'Task already completed or invalid' });
     }
 
-    const task = taskCheck.rows[0];
-
-    // Fetch campaign target URL
-    const campRes = await db.query('SELECT target_url FROM campaigns WHERE id = $1', [task.campaign_id]);
-    const targetUrl = campRes.rows.length > 0 ? campRes.rows[0].target_url : 'https://example.com';
-
-    await engagementQueue.add('process-engagement', {
-      taskId: task.id,
-      workerId,
-      campaignId: task.campaign_id,
-      reward: task.reward,
-      targetUrl,
-    });
-
-    res.json({ message: 'Task submitted for verification and processing' });
+    // Force task to processing for immediate worker pickup
+    await db.query("UPDATE tasks SET status = 'pending' WHERE id = $1", [taskId]);
+    res.json({ message: 'Task submitted for immediate automation worker processing' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -8,6 +8,7 @@ require('dotenv').config();
 const apiRoutes = require('./routes/api');
 const authRoutes = require('./routes/auth');
 const paymentRoutes = require('./routes/payments');
+const { startDbWorker } = require('./workers/dbWorker');
 
 const app = express();
 const server = http.createServer(app);
@@ -47,6 +48,7 @@ app.get('/health', (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  startDbWorker(io);
 });
 
 module.exports = { app, server, io };

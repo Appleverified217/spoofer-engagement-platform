@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Follower Farming & Engagement Exchange</title>
-  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; background: #f4f7f6; margin: 0; padding: 20px; }
     .container { max-width: 900px; margin: auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
@@ -16,17 +16,25 @@
     table { width: 100%; border-collapse: collapse; margin-top: 10px; }
     th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
     th { background: #007bff; color: white; }
+    .config-box { background: #e8f4fd; border: 1px solid #b6e0fe; padding: 10px; margin-bottom: 15px; border-radius: 4px; font-size: 14px; }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Social Media Engagement & Followers Farming</h1>
 
+    <!-- Backend URL Configuration for Cloudflare Pages -->
+    <div class="config-box">
+      <label for="backendUrlInput"><strong>Backend API URL:</strong></label>
+      <input type="text" id="backendUrlInput" value="http://localhost:4000" style="margin-top: 5px; margin-bottom: 5px;">
+      <button onclick="saveBackendUrl()" style="padding: 5px 10px; font-size: 12px;">Save URL</button>
+    </div>
+
     <!-- Dashboard -->
     <div class="card">
       <h3>Dashboard (User: <span id="usernameDisplay">Guest</span> | ID: <span id="userIdDisplay">1</span>)</h3>
-      <p>Credits: <strong id="creditsDisplay">1000</strong></p>
-      <button onclick="loadUser(1)">Refresh Balance</button>
+      <p>Status: <strong>Free Unlimited Mode</strong></p>
+      <button onclick="loadUser(1)">Refresh Status</button>
     </div>
 
     <!-- Campaign Section -->
@@ -41,10 +49,10 @@
           <option value="youtube">YouTube</option>
         </select>
         <label for="targetUrl">Target Profile/Post URL:</label>
-        <input type="text" id="targetUrl" placeholder="https://instagram.com/username" required>
+        <input type="text" id="targetUrl" placeholder="https://tiktok.com/@username" required>
         <label for="targetCount">Target Follower Count:</label>
         <input type="number" id="targetCount" value="10" min="1" required>
-        <button type="submit">Launch Campaign (-<span id="costPreview">100</span> Credits)</button>
+        <button type="submit" id="submitBtn">Launch Campaign (Free)</button>
       </form>
     </div>
 
@@ -62,35 +70,54 @@
   </div>
 
   <script>
-    const API_URL = 'http://localhost:4000/api';
+    let BACKEND_URL = localStorage.getItem('backend_url') || (window.location.hostname === 'localhost' ? 'http://localhost:4000' : '');
+    document.getElementById('backendUrlInput').value = BACKEND_URL;
+
+    function saveBackendUrl() {
+      BACKEND_URL = document.getElementById('backendUrlInput').value.replace(/\/$/, '');
+      localStorage.setItem('backend_url', BACKEND_URL);
+      alert('Backend URL saved successfully!');
+      loadUser(1);
+      loadTasks();
+    }
+
     let currentUserId = 1;
     let socket = null;
 
     async function loadUser(id) {
+      if (!BACKEND_URL) return;
       try {
-        const res = await fetch(`${API_URL}/users/${id}`);
+        const res = await fetch(`${BACKEND_URL}/api/users/${id}`);
         const data = await res.json();
-        document.getElementById('creditsDisplay').innerText = data.credits;
-        document.getElementById('usernameDisplay').innerText = data.username;
-        document.getElementById('userIdDisplay').innerText = data.id;
+        document.getElementById('usernameDisplay').innerText = data.username || 'Guest';
+        document.getElementById('userIdDisplay').innerText = data.id || 1;
       } catch (err) {
         console.error(err);
       }
     }
 
     function initSocket(userId) {
-      socket = io();
-      socket.emit('join_room', userId);
-      socket.on('credit_update', (data) => {
-        document.getElementById('creditsDisplay').innerText = data.credits;
-        alert(data.message);
-        loadTasks();
-      });
+      if (!BACKEND_URL) return;
+      if (socket) socket.disconnect();
+      try {
+        socket = io(BACKEND_URL);
+        socket.emit('join_room', userId);
+        socket.on('credit_update', (data) => {
+          alert(data.message);
+          loadTasks();
+        });
+      } catch (e) {
+        console.error('Socket connection error:', e);
+      }
     }
 
     async function loadTasks() {
+      if (!BACKEND_URL) {
+        alert('Please enter and save your Backend API URL at the top of the page first!');
+        return;
+      }
       try {
-        const res = await fetch(`${API_URL}/tasks/available`);
+        const res = await fetch(`${BACKEND_URL}/api/tasks/available`);
         const tasks = await res.json();
         const tbody = document.querySelector('#tasksTable tbody');
         tbody.innerHTML = '';
@@ -109,8 +136,9 @@
     }
 
     async function completeTask(taskId) {
+      if (!BACKEND_URL) return;
       try {
-        const res = await fetch(`${API_URL}/tasks/complete`, {
+        const res = await fetch(`${BACKEND_URL}/api/tasks/complete`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ taskId, workerId: currentUserId })
@@ -118,7 +146,6 @@
         const data = await res.json();
         alert(data.message || data.error);
         loadTasks();
-        loadUser(currentUserId);
       } catch (err) {
         console.error(err);
       }
@@ -126,33 +153,43 @@
 
     async function createCampaign(e) {
       e.preventDefault();
+      if (!BACKEND_URL) {
+        alert('Please enter and save your Backend API URL at the top of the page first!');
+        return;
+      }
+
       const platform = document.getElementById('platform').value;
       const targetUrl = document.getElementById('targetUrl').value;
       const targetCount = parseInt(document.getElementById('targetCount').value);
 
+      const btn = document.getElementById('submitBtn');
+      btn.innerText = 'Launching Campaign...';
+      btn.disabled = true;
+
       try {
-        const res = await fetch(`${API_URL}/campaigns`, {
+        const res = await fetch(`${BACKEND_URL}/api/campaigns`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId: currentUserId, platform, targetUrl, targetCount })
         });
         const data = await res.json();
-        alert(data.message || data.error);
-        loadUser(currentUserId);
+        alert(data.message || 'Campaign launched successfully!');
         loadTasks();
       } catch (err) {
         console.error(err);
+        alert('Failed to connect to backend. Please verify your Render Backend URL in the box at the top of the page.');
+      } finally {
+        btn.innerText = 'Launch Campaign (Free)';
+        btn.disabled = false;
       }
     }
 
-    document.getElementById('targetCount').addEventListener('input', (e) => {
-      document.getElementById('costPreview').innerText = e.target.value * 10;
-    });
-
-    // Initialize on load
-    loadUser(currentUserId);
-    initSocket(currentUserId);
-    loadTasks();
+    // Initialize on load if URL exists
+    if (BACKEND_URL) {
+      loadUser(currentUserId);
+      initSocket(currentUserId);
+      loadTasks();
+    }
   </script>
 </body>
 </html>
