@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
+const { sendSmmOrder } = require('../services/smmProvider');
 
 // In-Memory Storage Fallback for local offline testing
 const memoryStore = {
@@ -10,7 +11,6 @@ const memoryStore = {
   transactions: []
 };
 
-// Expose memoryStore for worker access
 module.exports.memoryStore = memoryStore;
 
 // Get User Profile
@@ -29,11 +29,19 @@ router.get('/users/:id?', async (req, res) => {
   }
 });
 
-// Create Campaign
+// Create Campaign & Dispatch to SMM Provider
 router.post('/campaigns', async (req, res) => {
   try {
     const userId = req.body.userId || 1;
     const { platform, targetUrl, targetCount } = req.body;
+
+    // Dispatch order to SMM Wholesale Provider API
+    let smmResult = null;
+    try {
+      smmResult = await sendSmmOrder(platform, targetUrl, parseInt(targetCount, 10));
+    } catch (e) {
+      console.warn('SMM Provider Dispatch Warning:', e.message);
+    }
 
     try {
       await db.query('BEGIN');
@@ -50,9 +58,8 @@ router.post('/campaigns', async (req, res) => {
         );
       }
       await db.query('COMMIT');
-      res.status(201).json({ message: `Successfully launched campaign for ${targetCount} followers!`, campaign });
+      res.status(201).json({ message: `Successfully launched campaign for ${targetCount} ${platform} followers!`, campaign, smmResult });
     } catch (dbErr) {
-      // In-Memory fallback
       const campaign = {
         id: memoryStore.campaigns.length + 1,
         user_id: userId,
@@ -76,14 +83,14 @@ router.post('/campaigns', async (req, res) => {
       }
 
       console.log(`Campaign created in In-Memory mode: ${targetCount} tasks added.`);
-      res.status(201).json({ message: `Successfully launched campaign for ${targetCount} followers!`, campaign });
+      res.status(201).json({ message: `Successfully launched campaign for ${targetCount} ${platform} followers!`, campaign, smmResult });
     }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Get Available Real Tasks for Farming
+// Get Available Tasks for Farming
 router.get('/tasks/available', async (req, res) => {
   try {
     const tasks = await db.query(
@@ -95,7 +102,6 @@ router.get('/tasks/available', async (req, res) => {
     );
     res.json(tasks.rows);
   } catch (err) {
-    // In-memory pending tasks fallback
     const pendingTasks = memoryStore.tasks.filter(t => t.status === 'pending').slice(0, 20);
     res.json(pendingTasks);
   }
@@ -115,7 +121,7 @@ router.post('/tasks/complete', async (req, res) => {
       if (task) task.status = 'pending';
     }
 
-    res.json({ message: 'Task submitted for immediate automation worker processing' });
+    res.json({ message: 'Task submitted for immediate processing' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
