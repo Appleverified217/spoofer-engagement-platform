@@ -16,12 +16,12 @@ async function ensureGuestUser() {
       await db.query('UPDATE users SET credits = 999999 WHERE id = 1');
     }
   } catch (err) {
-    console.warn('Database not connected or migration pending. Skipping guest user init:', err.message);
+    console.warn('Database not connected yet. Skipping guest user init:', err.message);
   }
 }
 ensureGuestUser();
 
-// Get User Profile (Default to user 1 with unlimited credits)
+// Get User Profile
 router.get('/users/:id?', async (req, res) => {
   try {
     const userId = req.params.id || 1;
@@ -30,54 +30,49 @@ router.get('/users/:id?', async (req, res) => {
       return res.json({ id: 1, username: 'guest_user', email: 'guest@platform.local', credits: 999999, role: 'user' });
     }
     const user = result.rows[0];
-    user.credits = 999999; // Ensure unlimited credits
+    user.credits = 999999;
     res.json(user);
   } catch (err) {
     res.json({ id: 1, username: 'guest_user', email: 'guest@platform.local', credits: 999999, role: 'user' });
   }
 });
 
-// Create Campaign (Free / No credit check or deduction)
+// Create Campaign (Real DB insertion & Task generation)
 router.post('/campaigns', async (req, res) => {
   try {
     const userId = req.body.userId || 1;
     const { platform, targetUrl, targetCount } = req.body;
 
-    let campaign = { id: Date.now(), platform, target_url: targetUrl, target_count: targetCount, completed_count: 0 };
-    try {
-      await db.query('BEGIN');
-      // No credit deduction or cost check
-      const campRes = await db.query(
-        'INSERT INTO campaigns (user_id, platform, target_url, target_count) VALUES ($1, $2, $3, $4) RETURNING *',
-        [userId, platform, targetUrl, targetCount]
+    await db.query('BEGIN');
+    const campRes = await db.query(
+      'INSERT INTO campaigns (user_id, platform, target_url, target_count) VALUES ($1, $2, $3, $4) RETURNING *',
+      [userId, platform, targetUrl, targetCount]
+    );
+    const campaign = campRes.rows[0];
+
+    for (let i = 0; i < targetCount; i++) {
+      const taskRes = await db.query(
+        'INSERT INTO tasks (campaign_id, reward) VALUES ($1, $2) RETURNING id',
+        [campaign.id, 10]
       );
-      campaign = campRes.rows[0];
-
-      for (let i = 0; i < targetCount; i++) {
-        const taskRes = await db.query(
-          'INSERT INTO tasks (campaign_id, reward) VALUES ($1, $2) RETURNING id',
-          [campaign.id, 10]
-        );
-        await engagementQueue.add('process-engagement', {
-          taskId: taskRes.rows[0].id,
-          campaignId: campaign.id,
-          reward: 10,
-          targetUrl,
-        }, { delay: i * 1000 });
-      }
-      await db.query('COMMIT');
-    } catch (dbErr) {
-      try { await db.query('ROLLBACK'); } catch (e) {}
-      console.warn('Database operation simulated due to offline DB:', dbErr.message);
+      await engagementQueue.add('process-engagement', {
+        taskId: taskRes.rows[0].id,
+        campaignId: campaign.id,
+        reward: 10,
+        targetUrl,
+      }, { delay: i * 1000 });
     }
+    await db.query('COMMIT');
 
-    res.status(201).json({ message: 'Campaign launched successfully (Free Mode)!', campaign });
+    res.status(201).json({ message: `Successfully launched campaign for ${targetCount} followers!`, campaign });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    try { await db.query('ROLLBACK'); } catch (e) {}
+    console.error('Failed to create campaign in DB:', err);
+    res.status(500).json({ error: `Database error: ${err.message}` });
   }
 });
 
-// Get Available Tasks for Farming
+// Get Available Real Tasks for Farming
 router.get('/tasks/available', async (req, res) => {
   try {
     const tasks = await db.query(
@@ -85,14 +80,12 @@ router.get('/tasks/available', async (req, res) => {
        FROM tasks t
        JOIN campaigns c ON t.campaign_id = c.id
        WHERE t.status = 'pending'
-       LIMIT 10`
+       LIMIT 20`
     );
     res.json(tasks.rows);
   } catch (err) {
-    res.json([
-      { id: 1, platform: 'instagram', target_url: 'https://instagram.com/example', reward: 10 },
-      { id: 2, platform: 'tiktok', target_url: 'https://tiktok.com/@example', reward: 10 }
-    ]);
+    console.error('Failed to fetch available tasks:', err.message);
+    res.json([]);
   }
 });
 
@@ -102,21 +95,24 @@ router.post('/tasks/complete', async (req, res) => {
     const taskId = req.body.taskId;
     const workerId = req.body.workerId || 1;
 
-    try {
-      const taskCheck = await db.query('SELECT * FROM tasks WHERE id = $1', [taskId]);
-      if (taskCheck.rows.length > 0) {
-        const task = taskCheck.rows[0];
-        await engagementQueue.add('process-engagement', {
-          taskId: task.id,
-          workerId,
-          campaignId: task.campaign_id,
-          reward: task.reward,
-          targetUrl: 'https://example.com'
-        });
-      }
-    } catch (e) {
-      console.warn('Task completion queued in simulation mode');
+    const taskCheck = await db.query('SELECT * FROM tasks WHERE id = $1 AND status = $2', [taskId, 'pending']);
+    if (taskCheck.rows.length === 0) {
+      return res.status(400).json({ error: 'Task already completed or invalid' });
     }
+
+    const task = taskCheck.rows[0];
+
+    // Fetch campaign target URL
+    const campRes = await db.query('SELECT target_url FROM campaigns WHERE id = $1', [task.campaign_id]);
+    const targetUrl = campRes.rows.length > 0 ? campRes.rows[0].target_url : 'https://example.com';
+
+    await engagementQueue.add('process-engagement', {
+      taskId: task.id,
+      workerId,
+      campaignId: task.campaign_id,
+      reward: task.reward,
+      targetUrl,
+    });
 
     res.json({ message: 'Task submitted for verification and processing' });
   } catch (err) {
