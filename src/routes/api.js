@@ -10,8 +10,10 @@ async function ensureGuestUser() {
     if (res.rows.length === 0) {
       await db.query(
         'INSERT INTO users (id, username, email, password_hash, credits, role) VALUES (1, $1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING',
-        ['guest_user', 'guest@platform.local', 'nopassword', 1000, 'user']
+        ['guest_user', 'guest@platform.local', 'nopassword', 999999, 'user']
       );
+    } else {
+      await db.query('UPDATE users SET credits = 999999 WHERE id = 1');
     }
   } catch (err) {
     console.warn('Database not connected or migration pending. Skipping guest user init:', err.message);
@@ -19,42 +21,32 @@ async function ensureGuestUser() {
 }
 ensureGuestUser();
 
-// Get User Profile (Default to user 1 if not specified)
+// Get User Profile (Default to user 1 with unlimited credits)
 router.get('/users/:id?', async (req, res) => {
   try {
     const userId = req.params.id || 1;
     const result = await db.query('SELECT id, username, email, credits, role, created_at FROM users WHERE id = $1', [userId]);
     if (result.rows.length === 0) {
-      return res.json({ id: 1, username: 'guest_user', email: 'guest@platform.local', credits: 1000, role: 'user' });
+      return res.json({ id: 1, username: 'guest_user', email: 'guest@platform.local', credits: 999999, role: 'user' });
     }
-    res.json(result.rows[0]);
+    const user = result.rows[0];
+    user.credits = 999999; // Ensure unlimited credits
+    res.json(user);
   } catch (err) {
-    // Fallback response if database is offline during local test
-    res.json({ id: 1, username: 'guest_user', email: 'guest@platform.local', credits: 1000, role: 'user' });
+    res.json({ id: 1, username: 'guest_user', email: 'guest@platform.local', credits: 999999, role: 'user' });
   }
 });
 
-// Create Campaign
+// Create Campaign (Free / No credit check or deduction)
 router.post('/campaigns', async (req, res) => {
   try {
     const userId = req.body.userId || 1;
     const { platform, targetUrl, targetCount } = req.body;
-    const cost = targetCount * 10;
-
-    let userCredits = 1000;
-    try {
-      const userRes = await db.query('SELECT credits FROM users WHERE id = $1', [userId]);
-      if (userRes.rows.length > 0) userCredits = userRes.rows[0].credits;
-    } catch (e) {
-      // ignore db error for fallback
-    }
-
-    if (userCredits < cost) return res.status(400).json({ error: 'Insufficient credits' });
 
     let campaign = { id: Date.now(), platform, target_url: targetUrl, target_count: targetCount, completed_count: 0 };
     try {
       await db.query('BEGIN');
-      await db.query('UPDATE users SET credits = credits - $1 WHERE id = $2', [cost, userId]);
+      // No credit deduction or cost check
       const campRes = await db.query(
         'INSERT INTO campaigns (user_id, platform, target_url, target_count) VALUES ($1, $2, $3, $4) RETURNING *',
         [userId, platform, targetUrl, targetCount]
@@ -79,7 +71,7 @@ router.post('/campaigns', async (req, res) => {
       console.warn('Database operation simulated due to offline DB:', dbErr.message);
     }
 
-    res.status(201).json({ message: 'Campaign created successfully', campaign });
+    res.status(201).json({ message: 'Campaign launched successfully (Free Mode)!', campaign });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -97,7 +89,6 @@ router.get('/tasks/available', async (req, res) => {
     );
     res.json(tasks.rows);
   } catch (err) {
-    // Fallback mock task if DB offline
     res.json([
       { id: 1, platform: 'instagram', target_url: 'https://instagram.com/example', reward: 10 },
       { id: 2, platform: 'tiktok', target_url: 'https://tiktok.com/@example', reward: 10 }
