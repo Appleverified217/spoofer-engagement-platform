@@ -17,7 +17,7 @@ router.post('/create-checkout', authenticateToken, async (req, res) => {
 
     // In a real Stripe integration, you would create a Stripe Checkout Session here.
     // For simulation, we return a mock checkout session URL.
-    const checkoutSessionId = `cs_test_${Math.random().toString(36.substring(7))}`;
+    const checkoutSessionId = `cs_test_${Math.random().toString(36).substring(2, 15)}`;
 
     res.json({
       checkoutUrl: `/api/payments/webhook-simulate?session_id=${checkoutSessionId}&user_id=${req.user.id}&credits=${selectedPackage.credits}`,
