@@ -1,5 +1,13 @@
 const request = require('supertest');
-const app = require('../src/server');
+const { app, server } = require('../src/server');
+
+afterAll((done) => {
+  if (server) {
+    server.close(done);
+  } else {
+    done();
+  }
+});
 
 describe('Follower Farming Platform API Tests', () => {
   test('GET /health should return status ok', async () => {
@@ -11,8 +19,7 @@ describe('Follower Farming Platform API Tests', () => {
 
   test('GET /api/tasks/available should return array', async () => {
     const res = await request(app).get('/api/tasks/available');
-    // Depending on DB connection in test env, expect 200 or 500 if DB is offline,
-    // but in CI/test we handle gracefully or expect JSON array.
-    expect([200, 500]).toContain(res.statusCode);
+    expect(res.statusCode).toEqual(200);
+    expect(Array.isArray(res.body)).toBeTruthy();
   });
 });
