@@ -5,7 +5,18 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://postgres:secretpassword@localhost:5432/follower_farming',
 });
 
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle PostgreSQL client', err);
+});
+
 module.exports = {
-  query: (text, params) => pool.query(text, params),
+  query: async (text, params) => {
+    try {
+      return await pool.query(text, params);
+    } catch (err) {
+      console.error(`Database Query Error (${err.message}):`, text);
+      throw err;
+    }
+  },
   pool,
 };
